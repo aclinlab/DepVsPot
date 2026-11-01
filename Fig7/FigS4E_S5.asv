@@ -1,0 +1,222 @@
+numSets = 3
+
+thetas_all = cell(numSets,1);
+weights_all = cell(numSets,1);
+hdi95_all = cell(numSets,1);
+theta_vars_all = cell(numSets,1);
+for c=1:numSets
+    thetas_all{c} = [];
+    weights_all{c} = [];
+end
+
+% data
+S = load('learnedRealData.mat');
+for c=1:length(S.results)
+    thetas_all{1}(end+1,:,:) = S.results(c).theta;
+    weights_all{1}(end+1,:,:) = S.results(c).weights;
+end
+
+% neg ctrls
+S = load('learnedNegCtrl.mat');
+for c=1:length(S.results)
+    thetas_all{2}(end+1,:,:) = S.results(c).theta;
+    weights_all{2}(end+1,:,:) = S.results(c).weights;
+end
+
+% downsampled
+S = load('learnedDownsampled.mat');
+for c=1:length(S.results)
+    thetas_all{3}(end+1,:,:) = S.results(c).theta;
+    weights_all{3}(end+1,:,:) = S.results(c).weights;
+end
+
+load('learned_lims.mat'); % learned_limits - limits of priors for learned params
+
+%% combine all into N*numReps x D matrices
+thetas_all_linear = cell(numSets,1);
+weights_all_linear = cell(numSets,1);
+D = size(thetas_all{1},3);
+map_particles = zeros(numSets,D);
+map_particles_per_rep = cell(numSets,1);
+for c=1:numSets
+    [numReps, N, D] = size(thetas_all{c});
+    thetas_all_linear{c} = reshape(thetas_all{c},numReps*N,D);
+    weights_all_linear{c} = reshape(weights_all{c},numReps*N,1);
+    w = weights_all_linear{c} / sum(weights_all_linear{c});
+    map_particles(c,:) = sum(w .* thetas_all_linear{c}, 1); % weighted mean of particles
+    map_particles_per_rep{c} = zeros(numReps,D);
+    for i=1:numReps
+        w = weights_all{c}(i,:) / sum(weights_all{c}(i,:));
+        map_particles_per_rep{c}(i,:) = sum(w.* thetas_all{c}(i,:,:), 2);
+    end
+end
+
+%% analyse
+diffs = distributionOfDifferences(reshape(thetas_all{1}(:,:,14),[],1),weights_all{1}(:),...
+    reshape(thetas_all{2}(:,:,14),[],1),weights_all{2}(:),100000);
+disp('The real data is higher than the neg ctrl in ___ of pairs:')
+sum(nnz(diffs>0))/length(diffs)
+
+% %% figure 
+% % this figure is not in the manuscript but here you can compare the
+% % posterior distributions of 
+% S = load('learnedTmZero.mat'); 
+% negCtrl_thetas_all = [];
+% negCtrl_weights_all = [];
+% for i=1:length(S.results)
+%     negCtrl_thetas_all = [negCtrl_thetas_all; S.results(i).theta];
+%     negCtrl_weights_all = [negCtrl_weights_all; S.results(i).weights];
+% end
+% negCtrl_weights_all = negCtrl_weights_all/sum(negCtrl_weights_all);
+% negCtrl = negCtrl_weights_all' * negCtrl_thetas_all;
+% negCtrl(14) = 0;
+% 
+% 
+% figure, hold on
+% colors = {'r','k','m'};
+% alpha = 0.2;
+% transparent_colors = [...
+%     1 0 0 alpha; % r
+%     0 0 0 alpha; % k
+%     1 0 1 alpha]; % m
+% D = size(thetas_all{1},3);
+% for d=1:D
+%     subplot(4,5,d), hold on
+%     for c=1:numSets
+%         numReps = size(thetas_all{c},1);
+%         for i=1:numReps
+%             [f,xi] = ksdensity(thetas_all{c}(i,:,d),'Weights',weights_all{c}(i,:),'BoundaryCorrection','reflection');
+%             plot(xi,f,'Color',transparent_colors(c,:),'LineWidth',0.5)
+%         end
+%         [f,xi] = ksdensity(reshape(thetas_all{c}(:,:,d),[],1),'Weights',weights_all{c}(:),'BoundaryCorrection','reflection');
+%         plot(xi,f,colors{c},'LineWidth',3)
+%     end
+%     yl = ylim;
+%     % line(map_particle(d)*[1 1], yl, 'Color','k')
+%     % line(mu(d)*[1 1], yl, 'Color','b')
+%     for i=1:size(thetas_all{1},1)
+%         line(map_particles_per_rep{1}(i,d)*[1 1], yl, 'Color','r')
+%     end
+%     line(negCtrl(d)*[1 1], yl, 'Color', 'k')
+% end
+
+%% hdi95, var combined
+for c=1:numSets
+    numReps = size(thetas_all{c},1);
+    hdi95_all{c} = zeros(numReps,2,D);
+    theta_vars_all{c} = zeros(numReps,D);
+end
+hdi95_combined = cell(5,1);
+var_combined = cell(5,1);
+for c=1:numSets
+    c
+    numReps = size(thetas_all{c},1);
+    hdi95_combined{c} = zeros(D,2);
+    var_combined{c} = zeros(D,1);
+    for d=1:D
+        d
+        hdi95_combined{c}(d,:) = hdi95_weighted(reshape(thetas_all{c}(:,:,d),[],1),weights_all{c}(:));
+        var_combined{c}(d) = var(reshape(thetas_all{c}(:,:,d),[],1),weights_all{c}(:));
+        for i=1:numReps
+            hdi95_all{c}(i,:,d) = hdi95_weighted(thetas_all{c}(i,:,d),weights_all{c}(i,:));
+            theta_vars_all{c}(i,d) = var(thetas_all{c}(i,:,d),weights_all{c}(i,:));
+        end
+    end
+end
+
+%% Fig. S4E: plot variances of thetas for data and downsampled (1,3)
+
+indices = [1 3];
+group_labels = {'Real data','Downsampled'};
+% groups
+groups = [];
+variances = [];
+for i=1:length(indices)
+    groups = [groups; ones(size(theta_vars_all{indices(i)},1),1)*i];
+    variances = [variances; theta_vars_all{indices(i)}(:,14)];
+end
+
+
+figure, hold on
+set(gca,'units','centimeters','position',[1,1,1.8,2])
+set(gca,'TickLength',[.03 .03],'TickDir','out')
+fontsize(gca,6,'points')
+
+for i=1:length(indices)
+    line([i-0.25, i+0.25],mean(theta_vars_all{indices(i)}(:,14))*[1 1],'color','r','LineWidth',1)
+end
+swarmchart(groups,variances,5,'filled', ...
+    'MarkerFaceAlpha', 0.5, 'MarkerFaceColor','k', ...
+    'MarkerEdgeColor', 'none', ...
+    'XJitterWidth', 0.5);
+xlim([0.5 length(indices)+0.5])
+yl = ylim;
+ylim([0, yl(2)]);
+xl=xlim;
+% line(xl,[0 0],'color','k');
+
+xticks(1:length(indices));
+xticklabels(group_labels)
+ylabel('Var(post. dist. of T_m)')
+box off;
+
+
+
+%% plot just prob densities
+
+xlabels = {'\mu_{enter,pre}', '\sigma_{enter,pre}', 'm_{\mu,stay,pre}'...
+    'm_{\sigma,stay,pre}','\mu_s(V=15)', '\mu_s(V=30)', '\mu_s(V=60)',...
+    'H_0(V=0)','H_0(V=15)','H_0(V=30)','H_0(V=60)', 'H',...
+    'T_a','T_m','\sigma_s(V=15)','\sigma_s(V=30)','\sigma_s(V=60)',...
+    'unstable variability'};
+
+% this is the end result of 10 repetitions of gradient descent for
+% different fixed values of Tm
+S = load('unifiedModel_thetas.mat');
+allReplicatesThetas = S.allReplicatesThetas; % numReps,length(Tms),14)
+dimensionsToPlot = [5:13, 15:17];
+
+S = load('naiveCombinedParams_theta_w_only.mat');
+naive_particles = S.thetas_all_linear(:,1:4); % in this particular set of particles, param 5 is the model number and here they're 100% model 3
+naive_weights = S.weights_all_linear;
+
+figure('Position',[100 100 450 600])
+D = size(thetas_all_linear{1},2);
+for d=1:D
+    subplot(5,4,d)
+    hold on
+    [f,xi] = ksdensity(thetas_all_linear{1}(:,d),'Weights', ...
+        weights_all_linear{1},'BoundaryCorrection','reflection');
+    plot(xi,f)
+    axis square
+    xlabel(xlabels{d})
+    if d>4
+        if ismember(d,15:17)
+            MU_C = 1;
+            pd = makedist('Exponential', 'mu', MU_C);
+            low = learned_lims(d-4,1);
+            high = learned_lims(d-4,2);
+            t_pd = truncate(pd, low, high);
+            xi = low:0.1:high;
+            plot(xi,pdf(t_pd,xi),'r')
+        end
+        yl=ylim();
+        xlim(learned_lims(d-4,:))
+        line(learned_lims(d-4,1)*ones(1,2),yl,'Color','r')
+        line(learned_lims(d-4,2)*ones(1,2),yl,'Color','r')
+    else
+        [f,xi] = ksdensity(naive_particles(:,d),'Weights', ...
+            naive_weights,'BoundaryCorrection','reflection');
+        plot(xi,f,'r')
+    end
+    if ismember(d,dimensionsToPlot)
+        d
+        yl=ylim();
+        rectangle('Position',[min(allReplicatesThetas(:,:,d),[],'all') yl(1) ...
+            range(allReplicatesThetas(:,:,d),'all') range(yl)],...
+            'FaceColor',[0 0 0 0.1], 'EdgeColor','none'); 
+        % line(mean(allReplicatesThetas(:,4,d))*[1 1], yl, 'Color','k')
+        ylim(yl);
+    end
+    set(gca,'TickLength',[.03 .03],'TickDir','out')
+end

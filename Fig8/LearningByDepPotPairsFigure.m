@@ -1,0 +1,394 @@
+%% load data
+tic
+load ('LearningByDepPotPairs_results20260728_204641.mat'); % this is not uploaded but follow the instructions in the readme to generate a similar results file
+disp('loaded file')
+toc
+
+%% calculations
+
+numModels = 4;
+numtrainingSamples = 15;
+numTrials = 30;
+numInstances = size(test_p,1);
+
+bestLRindex = 11;
+
+overlaps_frac_by_trial = zeros(odors,odors,numModels);
+overlaps12_all = zeros(odors*(odors-1),numModels);
+[potResult, depResult, potResult_gen, depResult_gen] = deal(zeros(odors,odors,numModels));
+fractionKCsActive = squeeze(mean(Ys_binarised_all,[1 2 4])); % average of 1) model instances, 2) all KCs, 4) odor trials. End dimensions is numOdors x numModels
+maxPopActivity = max(fractionKCsActive,[],'all');
+
+for model=1:numModels
+    model
+
+    Ys_binarised_all_this_model = Ys_binarised_all(:,:,:,:,model);
+    meanKCactivity = squeeze(mean(Ys_binarised_all_this_model,[1 4]));
+    potResult(:,:,model) = squeeze(mean(test_p(:,bestLRindex,model,:,:,1),1)); % mean across random instances
+    depResult(:,:,model) = squeeze(mean(test_p(:,bestLRindex,model,:,:,2),1));
+    potResult_gen(:,:,model) = squeeze(mean(test_p_gen(:,bestLRindex,model,:,:,1),1));
+    depResult_gen(:,:,model) = squeeze(mean(test_p_gen(:,bestLRindex,model,:,:,2),1));
+
+    freqResponses_train = mean(Ys_binarised_all_this_model(:,:,:,1:numtrainingSamples),4);
+    freqResponses_test = mean(Ys_binarised_all_this_model(:,:,:,numtrainingSamples+1:end),4);
+    for odor1=1:odors
+        for odor2=1:odors
+            % odor1 is test, odor2 is train
+            overlaps_frac_by_trial(odor1,odor2, model) = mean(freqResponses_test(:,:,odor1).*freqResponses_train(:,:,odor2),'all');
+        end
+    end
+    theseOverlaps = overlaps_frac_by_trial(:,:,model);
+    overlaps12_all(:,model) = theseOverlaps(~eye(odors));
+end
+
+maxOverlap = max(overlaps12_all,[],'all');
+
+Preverse_0 = 1-normcdf(1.4423 - 0.2995); 
+
+%% Supp figure
+figure('Position',[100 100 600 450])
+numRows = 4;
+numCols = numModels+2;
+
+t = tiledlayout(numRows,numCols, 'TileSpacing','compact', 'Padding','compact');
+
+c = okabe_ito_colors;
+
+colorsForLines = {c.black, c.vermillion, c.blue, c.green};
+lineColors = {'b','r'};
+
+lines = {'-','--'};
+
+for model=1:numModels
+    % row 1: performance avg for all odor pairs
+    % subplot(numGraphs,numModels+1,model), 
+    subplot(numRows,numCols,model)
+    
+    hold on
+    for deppot=1:2
+        mean_over_odor_pairs = mean(test_p(:,:,model,:,:,deppot),[4 5]);
+        plot(logLRs, mean(mean_over_odor_pairs,1), strcat(lines{deppot},'o',lineColors{deppot}),'MarkerSize',2);
+        % don't bother plotting error bars because they are smaller than
+        % the dots
+        % errorbar(logLRs, mean(mean_over_odor_pairs,1), std(mean_over_odor_pairs,0,1), strcat(lines{deppot},'o',lineColors{deppot}),'CapSize',0);
+    end
+    ylim([0 0.6])
+    xl = xlim;
+    line(xl,Preverse_0*[1 1],'Color','k')
+    xlabel('log(learning rate)')
+    ylabel('P(reverse)')
+
+    set(gca,'TickDir','out','Color','none','Box','off','units','centimeters','FontSize',6,'TickLength',[.03 .03])
+    axis square
+    ax = gca;
+    ax.Position(3:4) = [2 2];
+end
+
+% row 2: plot performance diff vs odor overlap
+
+for model= 1:numModels
+
+    % next: fix KCactivity matrix
+    
+    subplot(numRows,numCols,numCols + model)
+    plotPerfVsOverlap(overlaps_frac_by_trial(:,:,model), depResult(:,:,model) - potResult(:,:,model), fractionKCsActive(:,model), maxPopActivity, 1);    
+    ylim([-0.05 0.4])
+    xlim([0 maxOverlap])
+    set(gca,'TickDir','out','Color','none','Box','off','units','centimeters','FontSize',6,'TickLength',[.03 .03])
+    axis square
+    ax = gca;
+    rasterizeScatterLayer(ax,600);
+    ax.Position(3:4) = [2 2];
+    xl = xlim;
+    line(xl,[0 0],'Color','k')
+    xlabel('Overlap')
+    ylabel({'P(reverse), Odor A','Dep - Pot'})
+
+    subplot(numRows,numCols,numCols*2 + model)
+    plotPerfVsOverlap(overlaps_frac_by_trial(:,:,model), depResult_gen(:,:,model) - potResult_gen(:,:,model), fractionKCsActive(:,model), maxPopActivity, 2);    
+    ylim([-0.4 0.05])
+    xlim([0 maxOverlap])
+    set(gca,'TickDir','out','Color','none','Box','off','units','centimeters','FontSize',6,'TickLength',[.03 .03])
+    axis square
+    ax = gca;
+    rasterizeScatterLayer(ax,600);
+    ax.Position(3:4) = [2 2];
+    xl = xlim;
+    line(xl,[0 0],'Color','k')
+    ylabel({'P(reverse), Odor B','Dep - Pot'})
+
+end
+
+% row 1:
+% compare dep vs pot for all model instances
+% subplot(numGraphs,numModels+1,numModels+1), 
+meanLineWidth = 0.4;
+subplot(numRows,numCols,numModels+[1 2])
+hold on
+for model= 1:numModels
+    mean_bestLR = permute(mean(test_p(:,bestLRindex,model,:,:,:), [4 5]),[1 6 2 3 4 5]);
+    left_x = (model-1)*3;
+    plot(left_x + [0 1], mean_bestLR,'Color',[0 0 0 0.1])
+    for deppot=1:2
+        line(left_x + (deppot-1) + [-meanLineWidth, meanLineWidth], mean(mean_bestLR(:,deppot),1)*[1 1], 'LineWidth',2, 'Color', colorsForLines{model});
+    end
+    xlim([-1 11])
+end
+set(gca,'TickDir','out','Color','none','Box','off','units','centimeters','FontSize',6,'TickLength',[.03 .03])
+ax = gca;
+ax.Position(3:4) = [4 2];
+ax.XAxis.Visible = 'off';
+ylabel('P(reverse)')
+
+
+% row 2: show distribution of overlaps
+subplot(numRows,numCols,numCols + numModels+[1 2])
+hold on
+xValues = (0:numModels-1)*3;
+distributionPlot(overlaps12_all,'xValues',xValues+0.5,'color',colorsForLines,'showMM',0);
+for model=1:numModels
+    line(xValues(model) + 0.5 + meanLineWidth*[-1,1], mean(overlaps12_all(:,model))*[1 1], 'LineWidth',1,'Color','r');
+end
+ylim([0 maxOverlap])
+xlim([-1 11])
+set(gca,'TickDir','out','Color','none','Box','off','units','centimeters','FontSize',6,'TickLength',[.03 .03])
+ax = gca;
+ax.Position(3:4) = [4 2];
+ylabel('Fraction overlap')
+
+% row 3: compare dep vs pot for generalisation
+subplot(numRows,numCols,numCols*2 + numModels+[1 2])
+hold on
+for model= 1:numModels
+    mean_gen_bestLR = permute(mean(test_p_gen(:,bestLRindex,model,:,:,:), [4 5]),[1 6 2 3 4 5]);
+    left_x = (model-1)*3;
+    plot(left_x + [0 1], mean_gen_bestLR,'Color',[0 0 0 0.1])
+    for deppot=1:2
+        line(left_x + (deppot-1) + [-meanLineWidth, meanLineWidth], mean(mean_gen_bestLR(:,deppot),1)*[1 1], 'LineWidth',2, 'Color', colorsForLines{model});
+    end
+    xlim([-1 11])
+end
+set(gca,'TickDir','out','Color','none','Box','off','units','centimeters','FontSize',6,'TickLength',[.03 .03])
+ax = gca;
+ax.Position(3:4) = [4 2];
+ax.XAxis.Visible = 'off';
+ylabel('P(reverse)')
+
+
+%% Main figure
+figure('Position',[100,100,400,300])
+numRows = 3;
+numCols = 4;
+model = 2; % cyan
+maxOverlap = max(overlaps12_all(:,model));
+
+actualTa = 0.0215;
+actualTm = 0.1710;
+
+
+% Fig 8A
+
+ax(1) = subplot(numRows, numCols, 1);
+
+z = 0;
+x = 1;
+tmValues=0:0.006:0.3;
+taValues = 0:0.001:0.05; 
+a = 0.06; % % 0.2 cells respond to A, 0.06 unique to A, 0.14 also respond to B
+overlapFraction = 0.7;
+y = overlapFraction./(1-overlapFraction);
+
+[DepMinusPot,RdResults,RpResults] = deal(zeros(length(taValues),length(tmValues)));
+
+for ai=1:length(taValues)
+    ta = taValues(ai);
+    for mi=1:length(tmValues)
+        tm = tmValues(mi);
+        [Rd, Rp] = calcLearningDepPot_abc(x,y,z,ta,tm,a);
+        DepMinusPot(ai,mi) = Rd - Rp;
+        RdResults(ai,mi) = Rd;
+        RpResults(ai,mi) = Rp;
+    end
+end
+
+
+DepMinusPotDisplayRange = [min(DepMinusPot,[],'all'), max(DepMinusPot,[],'all')];
+% DepMinusPotDisplayRange = [0 0.3];
+% colormap(ax(1),redblue)
+% DepMinusPotDisplayRange = max(DepMinusPot,[],'all')*[-1 1];
+
+[~,indexActualTa] = min(abs(taValues - actualTa));
+[~,indexActualTm ] =min(abs(tmValues - actualTm));
+
+imagesc(DepMinusPot, DepMinusPotDisplayRange);
+hold on
+plot(indexActualTm,indexActualTa,'wx','MarkerSize',12,'LineWidth', 2)
+axis equal, axis tight;
+set(gca,'XTick',[],'YTick',[]);
+ylabel('T_a')
+xlabel('T_m');
+axHandle = gca;
+
+disp('DepMinusPot display range')
+disp(DepMinusPotDisplayRange)
+
+% Fig 8B
+
+ax(2) = subplot(numRows, numCols, 2);
+
+overlapFraction = 0:0.01:0.99; % what fraction of KCs are overlapping - that is q=c/(c+a) in the manuscript
+yValues = overlapFraction./(1-overlapFraction);
+
+sValues = 0:0.01:1;
+z = 0;
+% zValues= 0:0.01:1; % the expression is 0/0 at z=1 % the synapse lower bound is z, upper bound is 1 (0<=z<1)
+DepMinusPot = zeros(length(sValues),length(yValues));
+
+for si=1:length(sValues)
+    s = sValues(si);
+    for yi=1:length(yValues)
+        y = yValues(yi);
+        a = 0.2*(1-overlapFraction(yi));
+        [Rd, Rp] = calcLearningDepPot_abc(s,y,z,actualTa,actualTm,a);
+        DepMinusPot(si,yi) = Rd - Rp;
+
+    end
+end
+extreme = max([max(DepMinusPot,[],'all'), abs(min(DepMinusPot,[],'all'))])
+imagesc(DepMinusPot,0.3*[-1 1]); 
+set(gca, 'YDir', 'normal')
+hold on
+% superimpose the threshold line s=1/(1+q) where q=overlapFraction
+% need to scale the x and y axes of the plotted line to fit the indexes of
+% the heat map - the x-axis goes 1:100 <-> 0:0.01:0.99, y-axis goes 1:101 <-> 0:0.01:1
+plot(overlapFraction*100+1, (1./(1+overlapFraction))*100+1,'Color','k')
+axis equal, axis tight;
+set(gca,'XTick',[],'YTick',[]);
+xlabel('Overlap')
+ylabel('Plasticity progress')
+
+colormap(ax(2), redblue)
+
+% Fig 8D
+
+ax(3) = subplot(numRows, numCols, 5);
+hold on
+lineColors = {'b','r'};
+for deppot=1:2
+    mean_over_odor_pairs = mean(test_p(:,:,model,:,:,deppot),[4 5]);
+    plot(logLRs, mean(mean_over_odor_pairs,1), strcat(lines{deppot},'o',lineColors{deppot}),'MarkerSize',2);
+    % don't plot error bars as they are smaller than the dots
+    % errorbar(logLRs, mean(mean_over_odor_pairs,1), std(mean_over_odor_pairs,0,1), strcat(lines{deppot},'o',lineColors{deppot}),'MarkerSize',2);
+end
+line(logLRs(bestLRindex)*[1 1], [0 0.6],'LineStyle','--','Color','k')
+xlim([-5 0])
+xl = xlim;
+line(xl,Preverse_0*[1 1],'Color','k')
+ylim([0 0.6])
+xlabel('log(learning rate)')
+ylabel('P(reverse), Odor A')
+
+% Fig 8E left
+ax(4) = subplot(numRows, numCols, 6); % Depression
+plotPerfVsOverlap(overlaps_frac_by_trial(:,:,model), depResult(:,:,model), fractionKCsActive(:,model), maxPopActivity, 1);
+ylim([0 1])
+xlim([0 maxOverlap])
+xl = xlim;
+line(xl,Preverse_0*[1 1],'Color','k')
+ylabel('P(reverse), Odor A')
+xlabel('Overlap')
+
+% Fig 8E right
+ax(5) = subplot(numRows, numCols, 7); % potentiation
+plotPerfVsOverlap(overlaps_frac_by_trial(:,:,model), potResult(:,:,model), fractionKCsActive(:,model), maxPopActivity, 1);
+ylim([0 1])
+xlim([0 maxOverlap])
+xl = xlim;
+line(xl,Preverse_0*[1 1],'Color','k')
+xlabel('Overlap')
+
+% Fig 8F
+ax(6) = subplot(numRows, numCols, 8); % Dep - Pot
+plotPerfVsOverlap(overlaps_frac_by_trial(:,:,model), depResult(:,:,model) - potResult(:,:,model), fractionKCsActive(:,model), maxPopActivity, 1);
+ylim([-0.05 0.4])
+xlim([0 maxOverlap])
+xl = xlim;
+line(xl,[0 0],'Color','k')
+ylabel({'P(reverse), Odor A','Dep - Pot'})
+xlabel('Overlap')
+
+% Fig 8G
+ax(7) = subplot(numRows, numCols, 9);
+hold on
+lineColors = {'b','r'};
+for deppot=1:2
+    mean_over_odor_pairs = mean(test_p_gen(:,:,model,:,:,deppot),[4 5]);
+    plot(logLRs, mean(mean_over_odor_pairs,1), strcat(lines{deppot},'o',lineColors{deppot}),'MarkerSize',2);
+    % errorbar(logLRs, mean(mean_over_odor_pairs,1), std(mean_over_odor_pairs,0,1), strcat(lines{deppot},'o',lineColors{deppot}),'MarkerSize',2);
+end
+line(logLRs(bestLRindex)*[1 1], [0 0.6],'LineStyle','--','Color','k')
+xlim([-5 0])
+ylim([0 0.6])
+xl = xlim;
+line(xl,Preverse_0*[1 1],'Color','k')
+xlabel('log(learning rate)')
+ylabel('P(reverse), Odor B')
+
+% Fig 8H left
+ax(8) = subplot(numRows, numCols, 10);
+plotPerfVsOverlap(overlaps_frac_by_trial(:,:,model), depResult_gen(:,:,model), fractionKCsActive(:,model), maxPopActivity, 2);
+ylim([0 1])
+xlim([0 maxOverlap])
+xl = xlim;
+line(xl,Preverse_0*[1 1],'Color','k')
+ylabel('P(reverse), Odor B')
+xlabel('Overlap')
+
+% Fig 8H right
+ax(9) = subplot(numRows, numCols, 11);
+plotPerfVsOverlap(overlaps_frac_by_trial(:,:,model), potResult_gen(:,:,model), fractionKCsActive(:,model), maxPopActivity, 2);
+ylim([0 1])
+xlim([0 maxOverlap])
+xl = xlim;
+line(xl,Preverse_0*[1 1],'Color','k')
+xlabel('Overlap')
+
+% Fig 8I
+ax(10) = subplot(numRows, numCols, 12);
+plotPerfVsOverlap(overlaps_frac_by_trial(:,:,model), depResult_gen(:,:,model) - potResult_gen(:,:,model), fractionKCsActive(:,model), maxPopActivity, 2);
+ylim([-0.4 0.05])
+xlim([0 maxOverlap])
+xl = xlim;
+line(xl,[0 0],'Color','k')
+ylabel({'P(reverse), Odor B','Dep - Pot'})
+xlabel('Overlap')
+
+arrayfun(@(a) set(a, 'TickDir', 'out'), ax);
+arrayfun(@(a) axis(a, 'square'), ax);
+
+% turn the scatter plot into a image to avoid the figure crashing from
+% having thousands of points
+for i=3:10
+    set(ax(i),'Color','none')
+    box(ax(i),'off')
+    rasterizeScatterLayer(ax(i),600);
+end
+for i=1:10
+    set(ax(i),'units','centimeters','FontSize',6,'TickLength',[.03 .03])
+    ax(i).Position(3:4) = [2 2];
+end
+
+exportgraphics(gcf, 'figureraster.pdf', ...
+    'ContentType', 'vector', ...   % vector container (PDF), NOT 'image'
+    'Resolution',  600);
+
+function cmap = okabe_ito_colors()
+    cmap.black      = [0 0 0];
+    cmap.orange     = [0.90 0.60 0.00];
+    cmap.skyblue    = [0.35 0.70 0.90];
+    cmap.green      = [0.00 0.60 0.50];
+    cmap.yellow     = [0.95 0.90 0.25];
+    cmap.blue       = [0.00 0.45 0.70];
+    cmap.vermillion = [0.80 0.40 0.00];
+    cmap.purple     = [0.80 0.60 0.70];
+end
